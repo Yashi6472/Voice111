@@ -1,0 +1,82 @@
+import pyaudio
+import numpy as np
+from scipy.signal import butter, filtfilt, hamming
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Set the audio parameters
+CHUNK = 1024  # Chunk size
+FORMAT = pyaudio.paInt16  # Audio format
+CHANNELS = 1  # Mono audio
+RATE = 44100  # Sample rate
+FRAME_LENGTH = 1024  # Frame length for STFT
+HOP_LENGTH = 512  # Hop length for STFT
+NFFT = 2048  # FFT size for STFT
+
+# Initialize the audio recording
+p = pyaudio.PyAudio()
+stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+
+# Record the first voice
+print("Recording voice 1...")
+frames1 = []
+for i in range(0, int(RATE/CHUNK * 10)):  # Record for 10 seconds
+    data = stream.read(CHUNK)
+    frames1.append(data)
+print("Recording finished.")
+
+# Record the second voice
+print("Recording voice 2...")
+frames2 = []
+for i in range(0, int(RATE/CHUNK * 10)):  # Record for 10 seconds
+    data = stream.read(CHUNK)
+    frames2.append(data)
+print("Recording finished.")
+
+# Stop the audio recording
+stream.stop_stream()
+stream.close()
+p.terminate()
+
+# Convert the recorded audio frames to numpy arrays
+voice1 = np.frombuffer(b''.join(frames1), dtype=np.int16)
+voice2 = np.frombuffer(b''.join(frames2), dtype=np.int16)
+
+# Apply band-pass filtering to remove any unwanted frequencies
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    return b, a
+
+def bandpass_filter(data, lowcut=300, highcut=3000, fs=RATE, order=5):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = filtfilt(b, a, data)
+    return y
+
+voice1 = bandpass_filter(voice1)
+voice2 = bandpass_filter(voice2)
+
+# Normalize the audio signals
+def normalize(data):
+    return data / np.max(np.abs(data))
+
+voice1 = normalize(voice1)
+voice2 = normalize(voice2)
+
+#Compute the STFT of each audio signal
+def stft(data, frame_length=FRAME_LENGTH, hop_length=HOP_LENGTH, nfft=NFFT):
+    window = hamming(frame_length, sym=False)
+    return np.abs(np.array([np.fft.rfft(window * data[i:i+frame_length], n=nfft) for i in range(0, len(data)-frame_length, hop_length)]))
+
+voice1_stft = stft(voice1)
+voice2_stft = stft(voice2)
+
+# Compute the cosine similarity between the STFTs of the two audio signals
+similarity = cosine_similarity(voice1_stft.T, voice2_stft.T).diagonal().mean()
+print(similarity)
+ # Determine if the voices are the same or different based on the cosine similarity
+if similarity > 0.3:
+     print("The voices are the same.")
+else:
+     print("The voices are different.")
